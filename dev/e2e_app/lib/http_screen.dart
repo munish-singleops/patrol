@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:e2e_app/keys.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:patrol/patrol.dart';
 
 class HttpScreen extends StatefulWidget {
   const HttpScreen({super.key});
@@ -15,7 +16,15 @@ class HttpScreen extends StatefulWidget {
 class _HttpScreenState extends State<HttpScreen> {
   var _responseText = 'No request made yet';
   var _isLoading = false;
-  final _dio = Dio();
+  late final Dio _dio;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize Dio with PatrolDioInterceptor for test support
+    _dio = Dio();
+    _dio.interceptors.add(PatrolDioInterceptor());
+  }
 
   Future<void> _makeGetRequest() async {
     setState(() {

@@ -83,13 +83,22 @@ class HttpInterceptionController {
   /// Returns the most recently added mock that matches the request,
   /// or null if no mock matches. Supports mock sequences by tracking
   /// usage and applying repeatLast behavior.
-  MockConfiguration? findMatchingMock(HttpClientRequest request) {
+  ///
+  /// Accepts either [HttpClientRequest] or string [url] and [method].
+  MockConfiguration? findMatchingMock(
+    dynamic request, [
+    String? method,
+  ]) {
     MockConfiguration? lastMatch;
     
     // Iterate in reverse to get the most recent mock first
     for (var i = _mocks.length - 1; i >= 0; i--) {
       final mock = _mocks[i];
-      if (mock.matcher.matches(request)) {
+      final matches = request is HttpClientRequest
+          ? mock.matcher.matches(request)
+          : mock.matcher.matchesUrlAndMethod(request as String, method!);
+      
+      if (matches) {
         if (!mock.used) {
           // Found an unused mock, mark it and return it
           mock.markUsed();

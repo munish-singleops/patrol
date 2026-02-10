@@ -13,6 +13,7 @@ export 'src/http_interception/captured_request.dart';
 export 'src/http_interception/captured_response.dart';
 export 'src/http_interception/http_interception_extension.dart';
 export 'src/http_interception/mock_response.dart';
+export 'src/http_interception/patrol_dio_interceptor.dart';
 export 'src/http_interception/request_matcher.dart';
 export 'src/native/native.dart';
 export 'src/platform/contracts/contracts.dart'

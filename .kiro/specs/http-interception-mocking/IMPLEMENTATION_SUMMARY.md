@@ -20,12 +20,32 @@ A pure Dart HTTP interception and mocking system for Patrol tests that works wit
 - **PatrolHttpClientResponse**: Captures response data as it streams
 - **MockHttpClientResponse**: Returns mocked responses
 
-### 3. Controller
-- **HttpInterceptionController**: Singleton managing lifecycle, capture log, and mock configurations
+### 3. Dio Support
+- **PatrolDioInterceptor**: Dio interceptor for Http2Adapter compatibility
+- Works with ANY Dio adapter including Http2Adapter
+- Automatically exported from patrol package
 
-### 4. Test API
+### 4. Controller
+- **HttpInterceptionController**: Singleton managing lifecycle, capture log, and mock configurations
+- Supports both HttpClientRequest and string-based URL/method matching
+
+### 5. Test API
 - **HttpInterceptionApi**: User-facing API with methods for interception, mocking, and verification
 - **HttpInterceptionExtension**: Adds `$.http` getter to PatrolIntegrationTester
+
+## Http2Adapter Compatibility
+
+**Automatic Support**: Patrol now includes built-in Dio support! If your app uses Dio with Http2Adapter, simply add the `PatrolDioInterceptor` to your Dio instances:
+
+```dart
+import 'package:patrol/patrol.dart';
+
+final dio = Dio();
+dio.httpClientAdapter = Http2Adapter(...); // Keep your existing adapter
+dio.interceptors.add(PatrolDioInterceptor()); // Add Patrol interceptor
+```
+
+That's it! No app code changes needed, no adapter switching required.
 
 ## How to Use
 
