@@ -1,6 +1,7 @@
 import 'package:app_links/app_links.dart';
 import 'package:e2e_app/applink_screen.dart';
 import 'package:e2e_app/camera_screen.dart';
+import 'package:e2e_app/http_screen.dart';
 import 'package:e2e_app/keys.dart';
 import 'package:e2e_app/loading_screen.dart';
 import 'package:e2e_app/location_screen.dart';
@@ -287,6 +288,12 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
               MaterialPageRoute<void>(builder: (_) => const CameraScreen()),
             ),
             child: const Text('Open camera related features'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const HttpScreen()),
+            ),
+            child: const Text('Open HTTP test screen'),
           ),
           Text('EXAMPLE_KEY: ${const String.fromEnvironment('EXAMPLE_KEY')}'),
         ],

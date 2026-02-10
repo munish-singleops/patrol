@@ -77,4 +77,12 @@ class Keys {
   static const pickMultiplePhotosButton = Key('pickMultiplePhotosButton');
   static const smallImagePreview = Key('smallImagePreview');
   static const selectedPhotosCount = Key('selectedPhotosCount');
+
+  // http screen
+  static const httpScreen = Key('httpScreen');
+  static const getRequestButton = Key('getRequestButton');
+  static const postRequestButton = Key('postRequestButton');
+  static const multipleRequestsButton = Key('multipleRequestsButton');
+  static const dioRequestButton = Key('dioRequestButton');
+  static const responseText = Key('responseText');
 }
