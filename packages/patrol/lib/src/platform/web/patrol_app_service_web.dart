@@ -5,7 +5,7 @@
 /// and provides a Dart API for calling Playwright-exposed native actions.
 
 // Identifier name is for JS interop only; its value is not significant in Dart.
-// ignore_for_file: non_constant_identifier_names
+// ignore_for_file: non_constant_identifier_names, avoid_print
 library;
 
 import 'dart:async';
@@ -138,13 +138,13 @@ class PatrolAppService {
   /// bundled Dart test file.
   final DartGroupEntry topLevelDartTestGroup;
 
-  final _testExecutionRequested = Completer<String>();
+  var _testExecutionRequested = Completer<String>();
 
   /// A future that completes with the name of the Dart test file that was
   /// requested to execute.
   Future<String> get testExecutionRequested => _testExecutionRequested.future;
 
-  final _testExecutionCompleted = Completer<_TestExecutionResult>();
+  var _testExecutionCompleted = Completer<_TestExecutionResult>();
 
   /// A future that completes when the Dart test file (whose execution was
   /// requested) completes.
@@ -152,6 +152,12 @@ class PatrolAppService {
   /// Returns true if the test passed, false otherwise.
   Future<_TestExecutionResult> get testExecutionCompleted =>
       _testExecutionCompleted.future;
+
+  /// Resets the completers so the service can handle the next test request.
+  void _resetForNextTest() {
+    _testExecutionRequested = Completer<String>();
+    _testExecutionCompleted = Completer<_TestExecutionResult>();
+  }
 
   final _patrolLog = PatrolLogWriter();
 
@@ -164,8 +170,31 @@ class PatrolAppService {
     required bool passed,
     required String? details,
   }) async {
+    if (!_testExecutionRequested.isCompleted) {
+      print(
+        'PatrolAppService.markDartTestAsCompleted(): no test was requested, ignoring',
+      );
+      return;
+    }
+
     final requestedDartTestName = await testExecutionRequested;
-    assert(requestedDartTestName == dartFileName);
+    if (requestedDartTestName != dartFileName) {
+      print(
+        'PatrolAppService.markDartTestAsCompleted(): tried to mark test '
+        '$dartFileName as completed, but the requested test was '
+        '$requestedDartTestName — ignoring',
+      );
+      return;
+    }
+
+    if (_testExecutionCompleted.isCompleted) {
+      print(
+        'PatrolAppService.markDartTestAsCompleted(): completion already '
+        'reported for $dartFileName — ignoring duplicate',
+      );
+      return;
+    }
+
     _testExecutionCompleted.complete(
       _TestExecutionResult(passed: passed, details: details),
     );
@@ -189,6 +218,10 @@ class PatrolAppService {
 
   /// Runs a Dart test with the given [request].
   Future<RunDartTestResponse> runDartTest(RunDartTestRequest request) async {
+    if (_testExecutionCompleted.isCompleted) {
+      _resetForNextTest();
+    }
+
     _testExecutionRequested.complete(request.name);
     final result = await testExecutionCompleted;
     if (!result.passed) {
@@ -203,6 +236,9 @@ class PatrolAppService {
         TestEntry(name: request.name, status: TestEntryStatus.success),
       );
     }
+
+    _resetForNextTest();
+
     return RunDartTestResponse(
       result: result.passed
           ? RunDartTestResponseResult.success

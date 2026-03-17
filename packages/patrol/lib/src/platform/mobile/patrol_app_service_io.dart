@@ -68,13 +68,13 @@ class PatrolAppService extends PatrolAppServiceServer {
 
   /// A completer that completes with the name of the Dart test file that was
   /// requested to execute by the native side.
-  final _testExecutionRequested = Completer<String>();
+  var _testExecutionRequested = Completer<String>();
 
   /// A future that completes with the name of the Dart test file that was
   /// requested to execute by the native side.
   Future<String> get testExecutionRequested => _testExecutionRequested.future;
 
-  final _testExecutionCompleted = Completer<_TestExecutionResult>();
+  var _testExecutionCompleted = Completer<_TestExecutionResult>();
 
   /// A future that completes when the Dart test file (whose execution was
   /// requested by the native side) completes.
@@ -82,6 +82,12 @@ class PatrolAppService extends PatrolAppServiceServer {
   /// Returns true if the test passed, false otherwise.
   Future<_TestExecutionResult> get testExecutionCompleted {
     return _testExecutionCompleted.future;
+  }
+
+  /// Resets the completers so the service can handle the next test request.
+  void _resetForNextTest() {
+    _testExecutionRequested = Completer<String>();
+    _testExecutionCompleted = Completer<_TestExecutionResult>();
   }
 
   final _patrolLog = PatrolLogWriter();
@@ -96,17 +102,31 @@ class PatrolAppService extends PatrolAppServiceServer {
     required String? details,
   }) async {
     print('PatrolAppService.markDartTestAsCompleted(): $dartFileName');
-    assert(
-      _testExecutionRequested.isCompleted,
-      'Tried to mark a test as completed, but no tests were requested to run',
-    );
+
+    if (!_testExecutionRequested.isCompleted) {
+      print(
+        'PatrolAppService.markDartTestAsCompleted(): no test was requested, ignoring',
+      );
+      return;
+    }
 
     final requestedDartTestName = await testExecutionRequested;
-    assert(
-      requestedDartTestName == dartFileName,
-      'Tried to mark test $dartFileName as completed, but the test '
-      'that was most recently requested to run was $requestedDartTestName',
-    );
+    if (requestedDartTestName != dartFileName) {
+      print(
+        'PatrolAppService.markDartTestAsCompleted(): tried to mark test '
+        '$dartFileName as completed, but the requested test was '
+        '$requestedDartTestName — ignoring',
+      );
+      return;
+    }
+
+    if (_testExecutionCompleted.isCompleted) {
+      print(
+        'PatrolAppService.markDartTestAsCompleted(): completion already '
+        'reported for $dartFileName — ignoring duplicate',
+      );
+      return;
+    }
 
     _testExecutionCompleted.complete(
       _TestExecutionResult(passed: passed, details: details),
@@ -151,8 +171,12 @@ class PatrolAppService extends PatrolAppServiceServer {
 
   @override
   Future<RunDartTestResponse> runDartTest(RunDartTestRequest request) async {
-    assert(_testExecutionCompleted.isCompleted == false);
-    // patrolTest() always calls this method.
+    if (_testExecutionCompleted.isCompleted) {
+      // Previous test already completed its completer (e.g. due to a crash).
+      // Reset so this test can run cleanly instead of throwing a StateError
+      // that causes a 500 and cascades all remaining tests to fail.
+      _resetForNextTest();
+    }
 
     print('PatrolAppService.runDartTest(${request.name}) called');
     _testExecutionRequested.complete(request.name);
@@ -171,6 +195,8 @@ class PatrolAppService extends PatrolAppServiceServer {
         TestEntry(name: request.name, status: TestEntryStatus.success),
       );
     }
+
+    _resetForNextTest();
 
     return RunDartTestResponse(
       result: testExecutionResult.passed
