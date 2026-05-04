@@ -91,7 +91,8 @@ class PatrolAppService extends PatrolAppServiceServer {
   /// that closes connections when no response bytes are sent for ~2–4 minutes.
   /// `runDartTest` only returns after the Dart test finishes, so we stream
   /// whitespace periodically until the JSON result; Android Gson accepts leading
-  /// whitespace. The Android `PatrolAppServiceClient` also uses `Proxy.NO_PROXY`.
+  /// whitespace. The Android client uses `HttpURLConnection.openConnection(Proxy.NO_PROXY)`
+  /// (not OkHttp) so BrowserStack’s HTTP proxy / privoxy is not used for this hop.
   @override
   FutureOr<shelf.Response> handle(shelf.Request request) async {
     if ('runDartTest' == request.url.path) {
@@ -113,9 +114,12 @@ class PatrolAppService extends PatrolAppServiceServer {
   Stream<List<int>> _runDartTestJsonStreamWithHeartbeats(
     RunDartTestRequest requestObj,
   ) async* {
-    yield utf8.encode(' ');
+    // Larger chunks + shorter interval: some gateways only watch TCP activity
+    // or buffer small writes until flush.
+    final hb = utf8.encode(String.fromCharCodes(List.filled(512, 0x20)));
+    yield hb;
     final testFuture = runDartTest(requestObj);
-    const heartbeat = Duration(seconds: 20);
+    const heartbeat = Duration(seconds: 10);
     while (true) {
       try {
         final response = await testFuture.timeout(
@@ -125,7 +129,7 @@ class PatrolAppService extends PatrolAppServiceServer {
         yield utf8.encode(jsonEncode(response.toJson()));
         return;
       } on TimeoutException {
-        yield utf8.encode(' ');
+        yield hb;
       }
     }
   }

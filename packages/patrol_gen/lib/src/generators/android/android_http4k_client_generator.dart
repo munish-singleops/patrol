@@ -26,11 +26,10 @@ class AndroidHttp4kClientGenerator {
 package ${config.package};
 
 import com.google.gson.Gson
-import com.squareup.okhttp.MediaType
-import com.squareup.okhttp.OkHttpClient
-import com.squareup.okhttp.Request
-import com.squareup.okhttp.RequestBody
+import java.net.HttpURLConnection
 import java.net.Proxy
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
 ''';
@@ -39,8 +38,6 @@ import java.util.concurrent.TimeUnit
   String _generateClientClass(Service service) {
     const url = r'"http://$address:$port/"';
     final endpoints = service.endpoints.map(_createEndpoint).join('\n\n');
-    const throwException =
-        r'throw PatrolAppServiceClientException("Invalid response ${response.code()}, ${response?.body()?.string()}")';
 
     const urlWithPath = r'"$serverUrl$path"';
 
@@ -51,39 +48,39 @@ $endpoints
 
     private fun performRequest(path: String, requestBody: String? = null): String {
         val endpoint = $urlWithPath
-
-        val client = OkHttpClient().apply {
-            setConnectTimeout(timeout, timeUnit)
-            setReadTimeout(timeout, timeUnit)
-            setWriteTimeout(timeout, timeUnit)
-            // Cloud devices (e.g. BrowserStack) often set a system HTTP proxy. Patrol
-            // talks to the Dart VM on localhost / tun0 — that traffic must not leave
-            // the device or a gateway can return HTTP 504 on long runDartTest calls.
-            setProxy(Proxy.NO_PROXY)
-        }
-
-        val request = Request.Builder()
-            .url(endpoint)
-            .also {
-                if (requestBody != null) {
-                    it.post(RequestBody.create(jsonMediaType, requestBody))
-                }
+        val url = URL(endpoint)
+        val conn = url.openConnection(Proxy.NO_PROXY) as HttpURLConnection
+        val timeoutMillis = timeUnit.toMillis(timeout).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        conn.connectTimeout = timeoutMillis
+        conn.readTimeout = timeoutMillis
+        conn.useCaches = false
+        if (requestBody != null) {
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.outputStream.use { os ->
+                os.write(requestBody.toByteArray(StandardCharsets.UTF_8))
+                os.flush()
             }
-            .build()
-
-        val response = client.newCall(request).execute()
-        if (response.code() != 200) {
-            $throwException
+        } else {
+            conn.requestMethod = "GET"
         }
-
-        return response.body().string()
+        return try {
+            val code = conn.responseCode
+            val bodyStream = if (code >= 400) conn.errorStream else conn.inputStream
+            val body = bodyStream?.use { it.readBytes().toString(StandardCharsets.UTF_8) } ?: ""
+            if (code != 200) {
+                throw ${service.name}ClientException("Invalid response \$code, \$body")
+            }
+            body
+        } finally {
+            conn.disconnect()
+        }
     }
 
     val serverUrl = $url
 
     private val json = Gson()
-
-    private val jsonMediaType = MediaType.parse("application/json; charset=utf-8")
 }''';
   }
 
