@@ -2,6 +2,7 @@
 // ignore_for_file: avoid_print
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:patrol/src/common.dart';
@@ -85,6 +86,49 @@ class PatrolAppService extends PatrolAppServiceServer {
   }
 
   final _patrolLog = PatrolLogWriter();
+
+  /// Cloud Android farms (notably BrowserStack) may sit behind an HTTP gateway
+  /// that closes connections when no response bytes are sent for ~2–4 minutes.
+  /// `runDartTest` only returns after the Dart test finishes, so we stream
+  /// whitespace periodically until the JSON result; Android Gson accepts leading
+  /// whitespace. The Android `PatrolAppServiceClient` also uses `Proxy.NO_PROXY`.
+  @override
+  FutureOr<shelf.Response> handle(shelf.Request request) async {
+    if ('runDartTest' == request.url.path) {
+      final stringContent = await request.readAsString(utf8);
+      final jsonMap = jsonDecode(stringContent);
+      final requestObj = RunDartTestRequest.fromJson(
+        jsonMap as Map<String, dynamic>,
+      );
+      return shelf.Response.ok(
+        _runDartTestJsonStreamWithHeartbeats(requestObj),
+        headers: const {
+          'content-type': 'application/json; charset=utf-8',
+        },
+      );
+    }
+    return super.handle(request);
+  }
+
+  Stream<List<int>> _runDartTestJsonStreamWithHeartbeats(
+    RunDartTestRequest requestObj,
+  ) async* {
+    yield utf8.encode(' ');
+    final testFuture = runDartTest(requestObj);
+    const heartbeat = Duration(seconds: 20);
+    while (true) {
+      try {
+        final response = await testFuture.timeout(
+          heartbeat,
+          onTimeout: () => throw TimeoutException('patrol_app_service_heartbeat'),
+        );
+        yield utf8.encode(jsonEncode(response.toJson()));
+        return;
+      } on TimeoutException {
+        yield utf8.encode(' ');
+      }
+    }
+  }
 
   /// Marks [dartFileName] as completed with the given [passed] status.
   ///

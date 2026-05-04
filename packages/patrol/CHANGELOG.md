@@ -1,5 +1,6 @@
 ## 4.5.0
 
+- **BrowserStack Android (HTTP 504 on long tests):** `PatrolAppServiceClient` now sets **`Proxy.NO_PROXY`** so native→Dart HTTP does not follow the cloud device’s system HTTP proxy. **`PatrolAppService`** streams whitespace on the `runDartTest` response until the JSON body so gateways that drop idle long-poll connections are less likely to close the session.
 - **BrowserStack / LambdaTest Android:** `BrowserstackPatrolJUnitRunner` and `LambdaTestPatrolJUnitRunner` now prefer the **tun0** loopback IP for `PatrolAppServiceClient` whenever it is present. Using **localhost** after a successful `listDartTests()` left long `runDartTest()` calls on a single HTTP request that BrowserStack could answer with **HTTP 504** (~4 minutes); the tun0 path stays on-device and avoids that timeout.
 - Fix `appId` not being passed down on `$.platform.mobile.enterText` and `$.platform.mobile.enterTextByIndex` (#2992)
 - Bump `patrol_log` to `^0.8.0`.

@@ -143,6 +143,8 @@ You can follow BrowserStack's docs and/or follow the code of `bs_android` and `b
 
 `runDartTest` uses **one HTTP request** that stays open until the Dart test finishes. On BrowserStack, traffic to **localhost** can be routed in a way that returns **HTTP 504** (often after a few minutes) with an HTML error page. **`BrowserstackPatrolJUnitRunner`** therefore prefers the device **tun0** IPv4 address for `PatrolAppServiceClient` whenever `tun0` is present, instead of only falling back to it after `listDartTests()` fails on localhost.
 
+Patrol’s Android client also uses **`Proxy.NO_PROXY`** for calls to the Dart VM so OkHttp does not follow the device’s system HTTP proxy (cloud farms often set one; that path can hit a gateway timeout even for on-device addresses). On the Dart side, **`PatrolAppService`** streams periodic whitespace on the `runDartTest` response until the final JSON so middleboxes that require occasional response bytes are less likely to drop the connection.
+
 If you still see 504s, disable **`networkLogs`** in your execute-build API payload (some setups proxy traffic more aggressively when it is enabled).
 
 After scheduling the test execution, you can check the status of the test execution in the [App Automate dashboard][bs_app_automate_dashboard].

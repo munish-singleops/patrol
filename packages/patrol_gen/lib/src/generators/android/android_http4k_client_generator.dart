@@ -30,6 +30,7 @@ import com.squareup.okhttp.MediaType
 import com.squareup.okhttp.OkHttpClient
 import com.squareup.okhttp.Request
 import com.squareup.okhttp.RequestBody
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 ''';
@@ -55,6 +56,10 @@ $endpoints
             setConnectTimeout(timeout, timeUnit)
             setReadTimeout(timeout, timeUnit)
             setWriteTimeout(timeout, timeUnit)
+            // Cloud devices (e.g. BrowserStack) often set a system HTTP proxy. Patrol
+            // talks to the Dart VM on localhost / tun0 — that traffic must not leave
+            // the device or a gateway can return HTTP 504 on long runDartTest calls.
+            setProxy(Proxy.NO_PROXY)
         }
 
         val request = Request.Builder()
