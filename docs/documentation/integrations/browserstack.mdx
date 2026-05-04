@@ -139,6 +139,12 @@ You can follow BrowserStack's docs and/or follow the code of `bs_android` and `b
 </Accordion>
 </Accordions>
 
+## Troubleshooting: HTTP 504 during `runDartTest` (Android)
+
+`runDartTest` uses **one HTTP request** that stays open until the Dart test finishes. On BrowserStack, traffic to **localhost** can be routed in a way that returns **HTTP 504** (often after a few minutes) with an HTML error page. **`BrowserstackPatrolJUnitRunner`** therefore prefers the device **tun0** IPv4 address for `PatrolAppServiceClient` whenever `tun0` is present, instead of only falling back to it after `listDartTests()` fails on localhost.
+
+If you still see 504s, disable **`networkLogs`** in your execute-build API payload (some setups proxy traffic more aggressively when it is enabled).
+
 After scheduling the test execution, you can check the status of the test execution in the [App Automate dashboard][bs_app_automate_dashboard].
 
 If you need to change the test configuration, check out full list of available devices and OS versions in the [BrowserStack Browsers & Devices][bs_devices].

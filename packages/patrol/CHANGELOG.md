@@ -1,5 +1,6 @@
 ## 4.5.0
 
+- **BrowserStack / LambdaTest Android:** `BrowserstackPatrolJUnitRunner` and `LambdaTestPatrolJUnitRunner` now prefer the **tun0** loopback IP for `PatrolAppServiceClient` whenever it is present. Using **localhost** after a successful `listDartTests()` left long `runDartTest()` calls on a single HTTP request that BrowserStack could answer with **HTTP 504** (~4 minutes); the tun0 path stays on-device and avoids that timeout.
 - Fix `appId` not being passed down on `$.platform.mobile.enterText` and `$.platform.mobile.enterTextByIndex` (#2992)
 - Bump `patrol_log` to `^0.8.0`.
 - Signal develop session completion via `ConfigEntry.developCompletedKey`.

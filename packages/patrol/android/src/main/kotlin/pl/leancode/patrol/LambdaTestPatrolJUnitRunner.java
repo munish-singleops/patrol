@@ -12,20 +12,33 @@ import java.util.Objects;
 public class LambdaTestPatrolJUnitRunner extends PatrolJUnitRunner {
     @Override
     public PatrolAppServiceClient createAppServiceClient() {
-        // Create client with a default constructor (localhost:8082) by default.
-        PatrolAppServiceClient client = new PatrolAppServiceClient();
         waitForPatrolAppService();
 
+        // Same rationale as BrowserstackPatrolJUnitRunner: prefer tun0 for long runDartTest HTTP.
+        String tun0 = getLoopback();
+        if (tun0 != null && !tun0.isEmpty()) {
+            Logger.INSTANCE.i(
+                "LambdaTestPatrolJUnitRunner: using tun0 address " + tun0 + " for PatrolAppService");
+            try {
+                PatrolAppServiceClient client = new PatrolAppServiceClient(tun0);
+                client.listDartTests();
+                return client;
+            } catch (PatrolAppServiceClientException ex) {
+                ex.printStackTrace();
+                throw new RuntimeException(
+                    "LambdaTestPatrolJUnitRunner: PatrolAppService unreachable via tun0 " + tun0,
+                    ex);
+            }
+        }
+
+        PatrolAppServiceClient client = new PatrolAppServiceClient();
         try {
             client.listDartTests();
         } catch (PatrolAppServiceClientException ex) {
             ex.printStackTrace();
-            // If the client on localhost:8082 fails, let's apply the workaround
             Logger.INSTANCE.i("PatrolAppServiceClientException in createAppServiceClient " + ex.getMessage());
-            Logger.INSTANCE.i("LOOPBACK: " + getLoopback());
-            client = new PatrolAppServiceClient(getLoopback());
+            throw new RuntimeException(ex);
         }
-
         return client;
     }
 

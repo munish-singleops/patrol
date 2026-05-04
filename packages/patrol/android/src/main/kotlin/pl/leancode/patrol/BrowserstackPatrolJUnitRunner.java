@@ -12,22 +12,38 @@ import java.util.Objects;
 public class BrowserstackPatrolJUnitRunner extends PatrolJUnitRunner {
     @Override
     public PatrolAppServiceClient createAppServiceClient() {
-        // Create client with a default constructor (localhost:8082) by default.
-        PatrolAppServiceClient client = new PatrolAppServiceClient();
         waitForPatrolAppService();
 
-        try {
-            client.listDartTests();
-
-            //TODO verify in a project where we use BrowserStack
-        } catch (PatrolAppServiceClientException ex) {
-            ex.printStackTrace();
-            // If the client on localhost:8082 fails, let's apply the workaround
-            Logger.INSTANCE.i("PatrolAppServiceClientException in createAppServiceClient " + ex.getMessage());
-            Logger.INSTANCE.i("LOOPBACK: " + getLoopback());
-            client = new PatrolAppServiceClient(getLoopback());
+        // Prefer tun0 (device loopback IP) whenever BrowserStack exposes it.
+        // listDartTests() over localhost often succeeds quickly, but runDartTest()
+        // holds one HTTP request open for the entire Dart test; BrowserStack's
+        // path for localhost can return HTTP 504 (~4 min) on long tests while
+        // tun0 stays on-device and avoids that proxy/gateway timeout.
+        String tun0 = getLoopback();
+        if (tun0 != null && !tun0.isEmpty()) {
+            Logger.INSTANCE.i(
+                "BrowserstackPatrolJUnitRunner: using tun0 address " + tun0 + " for PatrolAppService");
+            try {
+                PatrolAppServiceClient client = new PatrolAppServiceClient(tun0);
+                client.listDartTests();
+                return client;
+            } catch (PatrolAppServiceClientException ex) {
+                ex.printStackTrace();
+                throw new RuntimeException(
+                    "BrowserstackPatrolJUnitRunner: PatrolAppService unreachable via tun0 " + tun0
+                        + " (do not fall back to localhost on BrowserStack — long tests get HTTP 504).",
+                    ex);
+            }
         }
 
+        PatrolAppServiceClient client = new PatrolAppServiceClient();
+        try {
+            client.listDartTests();
+        } catch (PatrolAppServiceClientException ex) {
+            ex.printStackTrace();
+            Logger.INSTANCE.i("PatrolAppServiceClientException in createAppServiceClient " + ex.getMessage());
+            throw new RuntimeException(ex);
+        }
         return client;
     }
 
