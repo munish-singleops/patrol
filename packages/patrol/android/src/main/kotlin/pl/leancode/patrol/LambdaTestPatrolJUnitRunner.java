@@ -1,7 +1,6 @@
 package pl.leancode.patrol;
 
 import android.util.Log;
-import pl.leancode.patrol.contracts.PatrolAppServiceClientException;
 
 import java.net.Inet4Address;
 import java.net.NetworkInterface;
@@ -14,8 +13,12 @@ public class LambdaTestPatrolJUnitRunner extends PatrolJUnitRunner {
     public PatrolAppServiceClient createAppServiceClient() {
         waitForPatrolAppService();
 
-        // Same address order as BrowserstackPatrolJUnitRunner: true IPv4 loopback
-        // first (Patrol runs in-process with the app), then tun0, then default host.
+        // Match BrowserstackPatrolJUnitRunner: localhost first, then 127.0.0.1, then tun0.
+        PatrolAppServiceClient viaDefault = tryPatrolAppServiceClientDefault();
+        if (viaDefault != null) {
+            return viaDefault;
+        }
+
         PatrolAppServiceClient viaLoopback = tryPatrolAppServiceClient("127.0.0.1");
         if (viaLoopback != null) {
             return viaLoopback;
@@ -24,23 +27,29 @@ public class LambdaTestPatrolJUnitRunner extends PatrolJUnitRunner {
         String tun0 = getLoopback();
         if (tun0 != null && !tun0.isEmpty()) {
             Logger.INSTANCE.i(
-                "LambdaTestPatrolJUnitRunner: 127.0.0.1 unreachable, trying tun0 " + tun0);
+                "LambdaTestPatrolJUnitRunner: loopback failed, trying tun0 " + tun0);
             PatrolAppServiceClient viaTun = tryPatrolAppServiceClient(tun0);
             if (viaTun != null) {
                 return viaTun;
             }
         }
 
-        Logger.INSTANCE.i("LambdaTestPatrolJUnitRunner: falling back to default host (localhost)");
+        throw new IllegalStateException(
+            "LambdaTestPatrolJUnitRunner: PatrolAppService unreachable via localhost, "
+                + "127.0.0.1, and tun0 (see earlier log lines)");
+    }
+
+    private PatrolAppServiceClient tryPatrolAppServiceClientDefault() {
         try {
             PatrolAppServiceClient client = new PatrolAppServiceClient();
             client.listDartTests();
-            return client;
-        } catch (PatrolAppServiceClientException ex) {
-            ex.printStackTrace();
             Logger.INSTANCE.i(
-                "PatrolAppServiceClientException in createAppServiceClient " + ex.getMessage());
-            throw new RuntimeException(ex);
+                "LambdaTestPatrolJUnitRunner: PatrolAppService OK via default (localhost)");
+            return client;
+        } catch (Exception ex) {
+            Logger.INSTANCE.i(
+                "LambdaTestPatrolJUnitRunner: default host failed: " + ex.getMessage());
+            return null;
         }
     }
 
@@ -51,7 +60,7 @@ public class LambdaTestPatrolJUnitRunner extends PatrolJUnitRunner {
             Logger.INSTANCE.i(
                 "LambdaTestPatrolJUnitRunner: PatrolAppService OK via " + address);
             return client;
-        } catch (PatrolAppServiceClientException ex) {
+        } catch (Exception ex) {
             Logger.INSTANCE.i(
                 "LambdaTestPatrolJUnitRunner: PatrolAppService failed via " + address + ": "
                     + ex.getMessage());

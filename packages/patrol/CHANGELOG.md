@@ -1,7 +1,8 @@
 ## 4.5.0
 
 - **BrowserStack Android (HTTP 504 on long tests):** Android **`PatrolAppServiceClient`** now uses **`runDartTestStart` + `runDartTestPoll`** so no single HTTP response stays open for the whole Dart test (short ~120s reads + 5s client sleep between polls). **`PatrolAppService`** resets execution completers after each polled run for the next test. **`HttpURLConnection` + `Proxy.NO_PROXY`** is unchanged for each request.
-- **BrowserStack / LambdaTest Android:** `BrowserstackPatrolJUnitRunner` and `LambdaTestPatrolJUnitRunner` now try **`127.0.0.1`** before **`tun0`** for `PatrolAppServiceClient` (BrowserStack can route **tun0** HTTP through **privoxy**; loopback avoids that). **`tun0`** remains a fallback when loopback is unreachable.
+- **BrowserStack / LambdaTest Android:** `BrowserstackPatrolJUnitRunner` and `LambdaTestPatrolJUnitRunner` try **default `localhost`**, then **`127.0.0.1`**, then **`tun0`** (short **start+poll** requests reduce **tun0** 504 risk; **localhost** avoids intermittent **`ConnectException`** to **`127.0.0.1`** seen on some cloud devices). Probe failures catch **`Exception`** so **`ConnectException`** during **`listDartTests`** advances the fallback chain.
+- **Android `PatrolAppServiceClient`:** **`runDartTestStart`** and **`runDartTestPoll`** retry on transient connection failures (**`ConnectException`**, **`SocketException`**, etc.) before failing the test.
 - Fix `appId` not being passed down on `$.platform.mobile.enterText` and `$.platform.mobile.enterTextByIndex` (#2992)
 - Bump `patrol_log` to `^0.8.0`.
 - Signal develop session completion via `ConfigEntry.developCompletedKey`.
