@@ -24,13 +24,30 @@ class PatrolAppServiceClient(address: String, port: Int, private val timeout: Lo
         return json.fromJson(response, Contracts.RunDartTestResponse::class.java)
     }
 
-    private fun performRequest(path: String, requestBody: String? = null): String {
+    /**
+     * Starts [runDartTest] without waiting for the Dart test to finish. Used with
+     * [runDartTestPoll] so each HTTP request stays short (cloud device gateways).
+     */
+    fun runDartTestStart(request: Contracts.RunDartTestRequest) {
+        performRequest("runDartTestStart", json.toJson(request), readTimeoutOverrideMs = 120_000)
+    }
+
+    /** Returns JSON: `{"pending":true}` or a final `RunDartTestResponse` JSON object. */
+    fun runDartTestPoll(): String {
+        return performRequest("runDartTestPoll", requestBody = null, readTimeoutOverrideMs = 120_000)
+    }
+
+    private fun performRequest(
+        path: String,
+        requestBody: String? = null,
+        readTimeoutOverrideMs: Int? = null,
+    ): String {
         val endpoint = "$serverUrl$path"
         val url = URL(endpoint)
         val conn = url.openConnection(Proxy.NO_PROXY) as HttpURLConnection
         val timeoutMillis = timeUnit.toMillis(timeout).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         conn.connectTimeout = timeoutMillis
-        conn.readTimeout = timeoutMillis
+        conn.readTimeout = readTimeoutOverrideMs ?: timeoutMillis
         conn.useCaches = false
         if (requestBody != null) {
             conn.requestMethod = "POST"

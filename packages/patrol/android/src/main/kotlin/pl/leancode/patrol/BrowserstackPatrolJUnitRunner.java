@@ -14,37 +14,52 @@ public class BrowserstackPatrolJUnitRunner extends PatrolJUnitRunner {
     public PatrolAppServiceClient createAppServiceClient() {
         waitForPatrolAppService();
 
-        // Prefer tun0 (device loopback IP) whenever BrowserStack exposes it.
-        // listDartTests() over localhost often succeeds quickly, but runDartTest()
-        // holds one HTTP request open for the entire Dart test; BrowserStack's
-        // path for localhost can return HTTP 504 (~4 min) on long tests while
-        // tun0 stays on-device and avoids that proxy/gateway timeout.
+        // BrowserStack injects a tunnel interface (often "tun0") and HTTP machinery
+        // (privoxy). HTTP to tun0's IPv4 can be steered through that proxy and return
+        // HTML 504 on long runDartTest() calls. Instrumentation and the Flutter app
+        // run in the same process for Patrol, so the Dart PatrolAppService is bound on
+        // loopback — prefer IPv4 127.0.0.1 (avoids ::1 / hostname quirks) before tun0.
+        PatrolAppServiceClient viaLoopback = tryPatrolAppServiceClient("127.0.0.1");
+        if (viaLoopback != null) {
+            return viaLoopback;
+        }
+
         String tun0 = getLoopback();
         if (tun0 != null && !tun0.isEmpty()) {
             Logger.INSTANCE.i(
-                "BrowserstackPatrolJUnitRunner: using tun0 address " + tun0 + " for PatrolAppService");
-            try {
-                PatrolAppServiceClient client = new PatrolAppServiceClient(tun0);
-                client.listDartTests();
-                return client;
-            } catch (PatrolAppServiceClientException ex) {
-                ex.printStackTrace();
-                throw new RuntimeException(
-                    "BrowserstackPatrolJUnitRunner: PatrolAppService unreachable via tun0 " + tun0
-                        + " (do not fall back to localhost on BrowserStack — long tests get HTTP 504).",
-                    ex);
+                "BrowserstackPatrolJUnitRunner: 127.0.0.1 unreachable, trying tun0 " + tun0);
+            PatrolAppServiceClient viaTun = tryPatrolAppServiceClient(tun0);
+            if (viaTun != null) {
+                return viaTun;
             }
         }
 
-        PatrolAppServiceClient client = new PatrolAppServiceClient();
+        Logger.INSTANCE.i("BrowserstackPatrolJUnitRunner: falling back to default host (localhost)");
         try {
+            PatrolAppServiceClient client = new PatrolAppServiceClient();
             client.listDartTests();
+            return client;
         } catch (PatrolAppServiceClientException ex) {
             ex.printStackTrace();
-            Logger.INSTANCE.i("PatrolAppServiceClientException in createAppServiceClient " + ex.getMessage());
+            Logger.INSTANCE.i(
+                "PatrolAppServiceClientException in createAppServiceClient " + ex.getMessage());
             throw new RuntimeException(ex);
         }
-        return client;
+    }
+
+    private PatrolAppServiceClient tryPatrolAppServiceClient(String address) {
+        try {
+            PatrolAppServiceClient client = new PatrolAppServiceClient(address);
+            client.listDartTests();
+            Logger.INSTANCE.i(
+                "BrowserstackPatrolJUnitRunner: PatrolAppService OK via " + address);
+            return client;
+        } catch (PatrolAppServiceClientException ex) {
+            Logger.INSTANCE.i(
+                "BrowserstackPatrolJUnitRunner: PatrolAppService failed via " + address + ": "
+                    + ex.getMessage());
+            return null;
+        }
     }
 
     public String getLoopback() {

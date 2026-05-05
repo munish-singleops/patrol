@@ -46,13 +46,17 @@ class ${service.name}Client(address: String, port: Int, private val timeout: Lon
 
 $endpoints
 
-    private fun performRequest(path: String, requestBody: String? = null): String {
+    private fun performRequest(
+        path: String,
+        requestBody: String? = null,
+        readTimeoutOverrideMs: Int? = null,
+    ): String {
         val endpoint = $urlWithPath
         val url = URL(endpoint)
         val conn = url.openConnection(Proxy.NO_PROXY) as HttpURLConnection
         val timeoutMillis = timeUnit.toMillis(timeout).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         conn.connectTimeout = timeoutMillis
-        conn.readTimeout = timeoutMillis
+        conn.readTimeout = readTimeoutOverrideMs ?: timeoutMillis
         conn.useCaches = false
         if (requestBody != null) {
             conn.requestMethod = "POST"

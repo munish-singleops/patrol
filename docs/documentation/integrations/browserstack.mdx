@@ -141,9 +141,9 @@ You can follow BrowserStack's docs and/or follow the code of `bs_android` and `b
 
 ## Troubleshooting: HTTP 504 during `runDartTest` (Android)
 
-`runDartTest` uses **one HTTP request** that stays open until the Dart test finishes. On BrowserStack, traffic to **localhost** can be routed in a way that returns **HTTP 504** (often after a few minutes) with an HTML error page. **`BrowserstackPatrolJUnitRunner`** therefore prefers the device **tun0** IPv4 address for `PatrolAppServiceClient` whenever `tun0` is present, instead of only falling back to it after `listDartTests()` fails on localhost.
+On Android, **`runDartTest`** is implemented as **`runDartTestStart`** (returns immediately) plus **`runDartTestPoll`** in a loop so no single HTTP response stays open for the whole Dart test (BrowserStack can cut long responses around ~200s). iOS still uses one long **`runDartTest`** request. On BrowserStack, HTTP to the tunnel interface’s IPv4 (**`tun0`**) can be steered through **privoxy** and return **HTTP 504** with an HTML error page on long calls. Instrumentation and the Flutter app run **in the same process** for Patrol, so **`BrowserstackPatrolJUnitRunner`** tries **`127.0.0.1`** first (true IPv4 loopback), then **`tun0`**, then default **`localhost`**.
 
-Patrol’s Android client uses **`HttpURLConnection.openConnection(Proxy.NO_PROXY)`** (not OkHttp) for calls to the Dart VM so traffic does not go through BrowserStack’s **privoxy** / system HTTP proxy (OkHttp 2.x could still route there on some images). On the Dart side, **`PatrolAppService`** streams periodic whitespace chunks on the `runDartTest` response until the final JSON so middleboxes that require occasional response bytes are less likely to drop the connection.
+Patrol’s Android client uses **`HttpURLConnection.openConnection(Proxy.NO_PROXY)`** for each `runDartTestStart` / `runDartTestPoll` call. The Dart **`PatrolAppService`** serves those endpoints and resets internal completers after each finished run so the next test can start cleanly.
 
 If you still see 504s, disable **`networkLogs`** in your execute-build API payload (some setups proxy traffic more aggressively when it is enabled).
 

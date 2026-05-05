@@ -69,13 +69,13 @@ class PatrolAppService extends PatrolAppServiceServer {
 
   /// A completer that completes with the name of the Dart test file that was
   /// requested to execute by the native side.
-  final _testExecutionRequested = Completer<String>();
+  var _testExecutionRequested = Completer<String>();
 
   /// A future that completes with the name of the Dart test file that was
   /// requested to execute by the native side.
   Future<String> get testExecutionRequested => _testExecutionRequested.future;
 
-  final _testExecutionCompleted = Completer<_TestExecutionResult>();
+  var _testExecutionCompleted = Completer<_TestExecutionResult>();
 
   /// A future that completes when the Dart test file (whose execution was
   /// requested by the native side) completes.
@@ -87,50 +87,98 @@ class PatrolAppService extends PatrolAppServiceServer {
 
   final _patrolLog = PatrolLogWriter();
 
-  /// Cloud Android farms (notably BrowserStack) may sit behind an HTTP gateway
-  /// that closes connections when no response bytes are sent for ~2–4 minutes.
-  /// `runDartTest` only returns after the Dart test finishes, so we stream
-  /// whitespace periodically until the JSON result; Android Gson accepts leading
-  /// whitespace. The Android client uses `HttpURLConnection.openConnection(Proxy.NO_PROXY)`
-  /// (not OkHttp) so BrowserStack’s HTTP proxy / privoxy is not used for this hop.
+  /// Native Android (BrowserStack) can enforce ~200s limits on a single HTTP
+  /// response. `runDartTestStart` + `runDartTestPoll` split work into short requests.
+  Completer<RunDartTestResponse>? _nativePollOutcome;
+
+  void _resetCompletersForNextNativeRun() {
+    _testExecutionRequested = Completer<String>();
+    _testExecutionCompleted = Completer<_TestExecutionResult>();
+  }
+
   @override
-  FutureOr<shelf.Response> handle(shelf.Request request) async {
-    if ('runDartTest' == request.url.path) {
-      final stringContent = await request.readAsString(utf8);
-      final jsonMap = jsonDecode(stringContent);
-      final requestObj = RunDartTestRequest.fromJson(
-        jsonMap as Map<String, dynamic>,
-      );
-      return shelf.Response.ok(
-        _runDartTestJsonStreamWithHeartbeats(requestObj),
-        headers: const {
-          'content-type': 'application/json; charset=utf-8',
-        },
-      );
+  FutureOr<shelf.Response> handle(shelf.Request request) {
+    if (request.url.path == 'runDartTestStart' && request.method == 'POST') {
+      return _handleRunDartTestStart(request);
+    }
+    if (request.url.path == 'runDartTestPoll' && request.method == 'GET') {
+      return _handleRunDartTestPoll();
     }
     return super.handle(request);
   }
 
-  Stream<List<int>> _runDartTestJsonStreamWithHeartbeats(
+  Future<shelf.Response> _handleRunDartTestStart(shelf.Request request) async {
+    if (_nativePollOutcome != null && !_nativePollOutcome!.isCompleted) {
+      return shelf.Response(
+        409,
+        body: '{"error":"run_dart_test_start_already_in_progress"}',
+        headers: const {'content-type': 'application/json; charset=utf-8'},
+      );
+    }
+    final stringContent = await request.readAsString(utf8);
+    final jsonMap = jsonDecode(stringContent);
+    final requestObj = RunDartTestRequest.fromJson(
+      jsonMap as Map<String, dynamic>,
+    );
+
+    _nativePollOutcome = Completer<RunDartTestResponse>();
+    final c = _nativePollOutcome!;
+    unawaited(_runNativeStartBody(requestObj, c));
+
+    return shelf.Response.ok(
+      '{"pending":true}',
+      headers: const {'content-type': 'application/json; charset=utf-8'},
+    );
+  }
+
+  Future<void> _runNativeStartBody(
     RunDartTestRequest requestObj,
-  ) async* {
-    // Larger chunks + shorter interval: some gateways only watch TCP activity
-    // or buffer small writes until flush.
-    final hb = utf8.encode(String.fromCharCodes(List.filled(512, 0x20)));
-    yield hb;
-    final testFuture = runDartTest(requestObj);
-    const heartbeat = Duration(seconds: 10);
-    while (true) {
-      try {
-        final response = await testFuture.timeout(
-          heartbeat,
-          onTimeout: () => throw TimeoutException('patrol_app_service_heartbeat'),
-        );
-        yield utf8.encode(jsonEncode(response.toJson()));
-        return;
-      } on TimeoutException {
-        yield hb;
+    Completer<RunDartTestResponse> c,
+  ) async {
+    try {
+      final r = await runDartTest(requestObj);
+      c.complete(r);
+    } catch (e, st) {
+      _resetCompletersForNextNativeRun();
+      if (!c.isCompleted) {
+        c.completeError(e, st);
       }
+    }
+  }
+
+  Future<shelf.Response> _handleRunDartTestPoll() async {
+    final c = _nativePollOutcome;
+    if (c == null) {
+      return shelf.Response.notFound(
+        '{"error":"no_active_run_dart_test_start"}',
+        headers: const {'content-type': 'application/json; charset=utf-8'},
+      );
+    }
+    if (!c.isCompleted) {
+      return shelf.Response.ok(
+        '{"pending":true}',
+        headers: const {'content-type': 'application/json; charset=utf-8'},
+      );
+    }
+    try {
+      final r = await c.future;
+      _nativePollOutcome = null;
+      _resetCompletersForNextNativeRun();
+      return shelf.Response.ok(
+        jsonEncode(r.toJson()),
+        headers: const {'content-type': 'application/json; charset=utf-8'},
+      );
+    } catch (e, st) {
+      _nativePollOutcome = null;
+      _resetCompletersForNextNativeRun();
+      return shelf.Response(
+        500,
+        body: jsonEncode({
+          'error': e.toString(),
+          'stackTrace': st.toString(),
+        }),
+        headers: const {'content-type': 'application/json; charset=utf-8'},
+      );
     }
   }
 
@@ -175,7 +223,7 @@ class PatrolAppService extends PatrolAppServiceServer {
 
     final requestedDartTest = await testExecutionRequested;
     if (requestedDartTest != dartTest) {
-      // If the requested Dart test is not the one we're waiting for now, it
+      // If the requested test is not the one we're waiting for now, it
       // means that dartTest was already executed. Return false so that callers
       // can skip the already executed test.
 

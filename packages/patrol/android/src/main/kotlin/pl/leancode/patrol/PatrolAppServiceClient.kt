@@ -1,5 +1,7 @@
 package pl.leancode.patrol
 
+import com.google.gson.Gson
+import com.google.gson.JsonParser
 import pl.leancode.patrol.contracts.Contracts
 import pl.leancode.patrol.contracts.PatrolAppServiceClientException
 import java.util.concurrent.TimeUnit
@@ -11,6 +13,8 @@ import pl.leancode.patrol.contracts.PatrolAppServiceClient as Client
 class PatrolAppServiceClient {
 
     private var client: Client
+
+    private val gson = Gson()
 
     // https://github.com/leancodepl/patrol/issues/1683
     private val timeout = 2L
@@ -49,7 +53,22 @@ class PatrolAppServiceClient {
 
     @Throws(PatrolAppServiceClientException::class)
     fun runDartTest(name: String): Contracts.RunDartTestResponse {
-        Logger.i("PatrolAppServiceClient.runDartTest($name)")
-        return client.runDartTest(Contracts.RunDartTestRequest(name))
+        Logger.i("PatrolAppServiceClient.runDartTest($name) via start+poll")
+        val req = Contracts.RunDartTestRequest(name)
+        client.runDartTestStart(req)
+        while (true) {
+            val body = client.runDartTestPoll()
+            val root = JsonParser.parseString(body).asJsonObject
+            if (root.has("pending") && root.get("pending").asBoolean) {
+                Thread.sleep(5_000L)
+                continue
+            }
+            if (root.has("error")) {
+                throw PatrolAppServiceClientException(
+                    "runDartTestPoll error: $body",
+                )
+            }
+            return gson.fromJson(body, Contracts.RunDartTestResponse::class.java)
+        }
     }
 }

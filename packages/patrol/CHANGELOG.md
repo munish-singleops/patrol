@@ -1,7 +1,7 @@
 ## 4.5.0
 
-- **BrowserStack Android (HTTP 504 on long tests):** `PatrolAppServiceClient` now uses **`HttpURLConnection.openConnection(Proxy.NO_PROXY)`** instead of OkHttp so native→Dart HTTP bypasses BrowserStack’s privoxy / system HTTP proxy (OkHttp 2.x could still be routed there). **`PatrolAppService`** streams periodic whitespace chunks on the `runDartTest` response until the JSON body so gateways that drop idle long-poll connections are less likely to close the session.
-- **BrowserStack / LambdaTest Android:** `BrowserstackPatrolJUnitRunner` and `LambdaTestPatrolJUnitRunner` now prefer the **tun0** loopback IP for `PatrolAppServiceClient` whenever it is present. Using **localhost** after a successful `listDartTests()` left long `runDartTest()` calls on a single HTTP request that BrowserStack could answer with **HTTP 504** (~4 minutes); the tun0 path stays on-device and avoids that timeout.
+- **BrowserStack Android (HTTP 504 on long tests):** Android **`PatrolAppServiceClient`** now uses **`runDartTestStart` + `runDartTestPoll`** so no single HTTP response stays open for the whole Dart test (short ~120s reads + 5s client sleep between polls). **`PatrolAppService`** resets execution completers after each polled run for the next test. **`HttpURLConnection` + `Proxy.NO_PROXY`** is unchanged for each request.
+- **BrowserStack / LambdaTest Android:** `BrowserstackPatrolJUnitRunner` and `LambdaTestPatrolJUnitRunner` now try **`127.0.0.1`** before **`tun0`** for `PatrolAppServiceClient` (BrowserStack can route **tun0** HTTP through **privoxy**; loopback avoids that). **`tun0`** remains a fallback when loopback is unreachable.
 - Fix `appId` not being passed down on `$.platform.mobile.enterText` and `$.platform.mobile.enterTextByIndex` (#2992)
 - Bump `patrol_log` to `^0.8.0`.
 - Signal develop session completion via `ConfigEntry.developCompletedKey`.
