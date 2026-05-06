@@ -404,7 +404,7 @@ class AutomatorServer(private val automation: Automator) : MobileAutomatorServer
     }
 
     override fun markPatrolAppServiceReady() {
-        PatrolServer.appReady.open()
+        PatrolServer.signalAppReady()
     }
 
     override fun isVirtualDevice(): Contracts.IsVirtualDeviceResponse {

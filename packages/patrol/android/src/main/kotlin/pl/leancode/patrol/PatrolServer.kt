@@ -1,6 +1,8 @@
 package pl.leancode.patrol
 
-import android.os.ConditionVariable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import org.http4k.core.ContentType
 import org.http4k.filter.ServerFilters
 import org.http4k.server.Http4kServer
@@ -49,7 +51,31 @@ class PatrolServer {
     }
 
     companion object {
-        val appReady: ConditionVariable = ConditionVariable()
+        /**
+         * Replaces [android.os.ConditionVariable] so we can **reset** readiness between app
+         * relaunches (older APIs cannot reset a ConditionVariable cleanly). One [CountDownLatch(1)] per
+         * launch cycle; Dart calls [signalAppReady] once when [PatrolAppService] is listening.
+         */
+        private val appReadyLatch = AtomicReference(CountDownLatch(1))
+        private val appReadySignaled = AtomicBoolean(false)
+
+        @JvmStatic
+        fun resetAppReadyLatch() {
+            appReadySignaled.set(false)
+            appReadyLatch.set(CountDownLatch(1))
+        }
+
+        @JvmStatic
+        fun awaitAppReady() {
+            appReadyLatch.get().await()
+        }
+
+        @JvmStatic
+        fun signalAppReady() {
+            if (appReadySignaled.compareAndSet(false, true)) {
+                appReadyLatch.get().countDown()
+            }
+        }
     }
 }
 

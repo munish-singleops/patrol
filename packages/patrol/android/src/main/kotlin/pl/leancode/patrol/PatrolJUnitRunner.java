@@ -35,6 +35,9 @@ public class PatrolJUnitRunner extends AndroidJUnitRunner {
     public PatrolAppServiceClient patrolAppServiceClient;
     private Map<String, Boolean> dartTestCaseSkipMap = new HashMap<>();
 
+    /** Activity used to launch the app; required to recover when PatrolAppService (:8082) is gone. */
+    private Class<?> configuredActivityClass;
+
     @Override
     protected boolean shouldWaitForActivitiesToComplete() {
         return false;
@@ -69,6 +72,8 @@ public class PatrolJUnitRunner extends AndroidJUnitRunner {
     public void setUp(Class<?> activityClass) {
         Logger.INSTANCE.i("PatrolJUnitRunner.setUp(): activityClass = " + activityClass.getCanonicalName());
 
+        configuredActivityClass = activityClass;
+
         // This code launches the app under test. It's based on ActivityTestRule#launchActivity.
         // It's simpler because we don't have the need for that much synchronization.
         // Currently, the only synchronization point we're interested in is when the app under test returns the list of tests.
@@ -77,22 +82,63 @@ public class PatrolJUnitRunner extends AndroidJUnitRunner {
         PatrolServer patrolServer = new PatrolServer();
         patrolServer.start(); // Gets killed when the instrumentation process dies. We're okay with this.
 
+        launchAppUnderTest(instrumentation, activityClass);
 
+        patrolAppServiceClient = createAppServiceClient();
+    }
 
-        // Try to get the launcher intent first, which handles activity aliases properly
+    /**
+     * Cold-starts (or foregrounds) the Flutter app under test. Used from {@link #setUp} and from
+     * {@link #ensureAppAndDartServiceAlive} when {@code localhost:8082} is unreachable — e.g. the
+     * app process was killed between parameterized {@code @Test} methods while instrumentation
+     * stayed alive.
+     */
+    protected static void launchAppUnderTest(Instrumentation instrumentation, Class<?> activityClass) {
         Intent intent = instrumentation.getTargetContext().getPackageManager()
                 .getLaunchIntentForPackage(instrumentation.getTargetContext().getPackageName());
-        
+
         if (intent == null) {
-            // Fallback to the original approach if no launcher intent is found
             intent = new Intent(Intent.ACTION_MAIN);
             intent.setClassName(instrumentation.getTargetContext(), activityClass.getCanonicalName());
         }
-        
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        instrumentation.getTargetContext().startActivity(intent);
 
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        instrumentation.getTargetContext().startActivity(intent);
+    }
+
+    /**
+     * Re-launch the app and block until Dart's PatrolAppService calls {@code markPatrolAppServiceReady}.
+     * Does not start a second {@link PatrolServer} — only use after an initial {@link #setUp}.
+     */
+    protected void ensureAppAndDartServiceAlive() {
+        if (configuredActivityClass == null) {
+            throw new IllegalStateException(
+                    "PatrolJUnitRunner.ensureAppAndDartServiceAlive: setUp(activityClass) was not called");
+        }
+        Logger.INSTANCE.i("PatrolJUnitRunner.ensureAppAndDartServiceAlive(): relaunch + wait for PatrolAppService");
+        PatrolServer.resetAppReadyLatch();
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        launchAppUnderTest(instrumentation, configuredActivityClass);
+        waitForPatrolAppService();
         patrolAppServiceClient = createAppServiceClient();
+    }
+
+    private static boolean isPatrolAppServiceConnectFailure(Throwable t) {
+        Throwable e = t;
+        while (e != null) {
+            if (e instanceof java.net.SocketException) {
+                return true;
+            }
+            String m = e.getMessage();
+            if (m != null
+                    && (m.contains("Failed to connect")
+                            || m.contains("Connection refused")
+                            || m.contains("ECONNREFUSED"))) {
+                return true;
+            }
+            e = e.getCause();
+        }
+        return false;
     }
 
     public PatrolAppServiceClient createAppServiceClient() {
@@ -113,13 +159,18 @@ public class PatrolJUnitRunner extends AndroidJUnitRunner {
         final String TAG = "PatrolJUnitRunner.setUp(): ";
 
         Logger.INSTANCE.i(TAG + "Waiting for PatrolAppService to report its readiness...");
-        PatrolServer.Companion.getAppReady().block();
+        PatrolServer.awaitAppReady();
 
         Logger.INSTANCE.i(TAG + "PatrolAppService is ready to report Dart tests");
     }
 
     public Object[] listDartTests() {
+        return listDartTestsWithRecovery(0);
+    }
+
+    private Object[] listDartTestsWithRecovery(int attempt) {
         final String TAG = "PatrolJUnitRunner.listDartTests(): ";
+        final int maxAttempts = 3;
 
         try {
             final DartGroupEntry dartTestGroup = patrolAppServiceClient.listDartTests();
@@ -135,6 +186,16 @@ public class PatrolJUnitRunner extends AndroidJUnitRunner {
         } catch (PatrolAppServiceClientException e) {
             Logger.INSTANCE.e(TAG + "Failed to list Dart tests: ", e);
             throw new RuntimeException(e);
+        } catch (Throwable t) {
+            if (attempt < maxAttempts - 1 && isPatrolAppServiceConnectFailure(t) && configuredActivityClass != null) {
+                Logger.INSTANCE.e(
+                        TAG + "PatrolAppService unreachable (attempt " + (attempt + 1) + "/" + maxAttempts + "), recovering",
+                        t);
+                ensureAppAndDartServiceAlive();
+                return listDartTestsWithRecovery(attempt + 1);
+            }
+            Logger.INSTANCE.e(TAG + "Failed to list Dart tests: ", t);
+            throw new RuntimeException(t);
         }
     }
 
@@ -143,8 +204,13 @@ public class PatrolJUnitRunner extends AndroidJUnitRunner {
      * Throws AssertionError if the test fails.
      */
     public RunDartTestResponse runDartTest(String name) {
+        return runDartTestWithRecovery(name, 0);
+    }
+
+    private RunDartTestResponse runDartTestWithRecovery(String name, int attempt) {
         final String TAG = "PatrolJUnitRunner.runDartTest(" + name + "): ";
-        
+        final int maxAttempts = 3;
+
         final Boolean skip = dartTestCaseSkipMap.get(name);
         if (skip) {
             Logger.INSTANCE.i(TAG + "Test skipped");
@@ -162,6 +228,18 @@ public class PatrolJUnitRunner extends AndroidJUnitRunner {
         } catch (PatrolAppServiceClientException e) {
             Logger.INSTANCE.e(TAG + e.getMessage(), e.getCause());
             throw new RuntimeException(e);
+        } catch (AssertionError e) {
+            throw e;
+        } catch (Throwable t) {
+            if (attempt < maxAttempts - 1 && isPatrolAppServiceConnectFailure(t) && configuredActivityClass != null) {
+                Logger.INSTANCE.e(
+                        TAG + "PatrolAppService unreachable (attempt " + (attempt + 1) + "/" + maxAttempts + "), recovering",
+                        t);
+                ensureAppAndDartServiceAlive();
+                return runDartTestWithRecovery(name, attempt + 1);
+            }
+            Logger.INSTANCE.e(TAG + t.getMessage(), t.getCause());
+            throw new RuntimeException(t);
         }
     }
 }
