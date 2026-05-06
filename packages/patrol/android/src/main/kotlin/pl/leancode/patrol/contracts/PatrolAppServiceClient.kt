@@ -3,13 +3,13 @@
 //  source: schema.dart
 //
 
-package pl.leancode.patrol.contracts;
+package pl.leancode.patrol.contracts
 
 import com.google.gson.Gson
-import com.squareup.okhttp.MediaType
-import com.squareup.okhttp.OkHttpClient
-import com.squareup.okhttp.Request
-import com.squareup.okhttp.RequestBody
+import java.net.HttpURLConnection
+import java.net.Proxy
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
 class PatrolAppServiceClient(address: String, port: Int, private val timeout: Long, private val timeUnit: TimeUnit) {
@@ -24,37 +24,58 @@ class PatrolAppServiceClient(address: String, port: Int, private val timeout: Lo
         return json.fromJson(response, Contracts.RunDartTestResponse::class.java)
     }
 
-    private fun performRequest(path: String, requestBody: String? = null): String {
+    /**
+     * Starts [runDartTest] without waiting for the Dart test to finish. Used with
+     * [runDartTestPoll] so each HTTP request stays short (cloud device gateways).
+     */
+    fun runDartTestStart(request: Contracts.RunDartTestRequest) {
+        performRequest("runDartTestStart", json.toJson(request), readTimeoutOverrideMs = 120_000)
+    }
+
+    /** Returns JSON: `{"pending":true}` or a final `RunDartTestResponse` JSON object. */
+    fun runDartTestPoll(): String {
+        return performRequest("runDartTestPoll", requestBody = null, readTimeoutOverrideMs = 120_000)
+    }
+
+    private fun performRequest(
+        path: String,
+        requestBody: String? = null,
+        readTimeoutOverrideMs: Int? = null,
+    ): String {
         val endpoint = "$serverUrl$path"
-
-        val client = OkHttpClient().apply {
-            setConnectTimeout(timeout, timeUnit)
-            setReadTimeout(timeout, timeUnit)
-            setWriteTimeout(timeout, timeUnit)
-        }
-
-        val request = Request.Builder()
-            .url(endpoint)
-            .also {
-                if (requestBody != null) {
-                    it.post(RequestBody.create(jsonMediaType, requestBody))
-                }
+        val url = URL(endpoint)
+        val conn = url.openConnection(Proxy.NO_PROXY) as HttpURLConnection
+        val timeoutMillis = timeUnit.toMillis(timeout).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        conn.connectTimeout = timeoutMillis
+        conn.readTimeout = readTimeoutOverrideMs ?: timeoutMillis
+        conn.useCaches = false
+        if (requestBody != null) {
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.outputStream.use { os ->
+                os.write(requestBody.toByteArray(StandardCharsets.UTF_8))
+                os.flush()
             }
-            .build()
-
-        val response = client.newCall(request).execute()
-        if (response.code() != 200) {
-            throw PatrolAppServiceClientException("Invalid response ${response.code()}, ${response?.body()?.string()}")
+        } else {
+            conn.requestMethod = "GET"
         }
-
-        return response.body().string()
+        return try {
+            val code = conn.responseCode
+            val bodyStream = if (code >= 400) conn.errorStream else conn.inputStream
+            val body = bodyStream?.use { it.readBytes().toString(StandardCharsets.UTF_8) } ?: ""
+            if (code != 200) {
+                throw PatrolAppServiceClientException("Invalid response $code, $body")
+            }
+            body
+        } finally {
+            conn.disconnect()
+        }
     }
 
     val serverUrl = "http://$address:$port/"
 
     private val json = Gson()
-
-    private val jsonMediaType = MediaType.parse("application/json; charset=utf-8")
 }
 
 class PatrolAppServiceClientException(message: String) : Exception(message)
